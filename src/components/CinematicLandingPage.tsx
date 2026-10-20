@@ -993,18 +993,13 @@ export const CinematicLandingPage: React.FC<CinematicLandingPageProps> = ({
               }}
               className="absolute inset-x-0 mx-auto max-w-xl flex flex-col items-center justify-center text-center px-4 z-30"
             >
-              <div className="mb-4 flex items-center justify-center">
-                <AestificArchIcon size={60} className="text-black" />
+              <div className="mb-8 flex items-center justify-center">
+                <img
+                  src="/aestific-logo-dark.png"
+                  alt="aestific"
+                  className="w-44 sm:w-56 h-auto object-contain select-none"
+                />
               </div>
-
-              <h2
-                className="lowercase font-medium tracking-[0.24em] text-black text-3xl sm:text-4xl leading-none select-none mb-8"
-                style={{
-                  fontFamily: "'Comfortaa', cursive, sans-serif",
-                }}
-              >
-                aestific
-              </h2>
 
               <button
                 onClick={onGetStarted}

@@ -2,7 +2,7 @@ import React from 'react';
 
 export interface AestificLogoProps {
   className?: string;
-  size?: 'xs' | 'sm' | 'md' | 'lg' | 'hero';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'hero' | 'sidebar';
   variant?: 'auto' | 'stacked' | 'horizontal' | 'mark-only' | 'hero';
   glow?: boolean;
   showTagline?: boolean;
@@ -13,44 +13,42 @@ export interface AestificLogoProps {
 }
 
 /**
- * Exact Aestific Brand Icon Emblem:
- * - Continuous circular stroke starting at the bottom (with rounded terminal)
- * - Curves around bottom-left, up the left side, over the top arch, and down the right
- * - Smooth U-turn at bottom right into the vertical stem
- * - Inner concentric lowercase 'a' circular bowl
- * - Dynamic color: pure black on white backgrounds, pure white on black backgrounds
+ * Exact Aestific Brand Icon Emblem from authentic official asset:
+ * - Dynamic color: pure black on white backgrounds, pure white on black/dark backgrounds
  */
 export const AestificArchIcon: React.FC<{
   className?: string;
   size?: number | string;
   color?: string;
-}> = ({ className = '', size, color }) => {
-  const hasCustomTextColor = className.includes('text-');
-  const defaultTextClass = color || hasCustomTextColor ? '' : 'text-black dark:text-white';
+}> = ({ className = '', size = 24, color }) => {
+  const isDark = color === 'white' || className.includes('text-white') || className.includes('fill-white');
+  const sizeVal = typeof size === 'number' ? `${size}px` : size;
 
   return (
     <div
-      className={`relative inline-flex items-center justify-center shrink-0 transition-colors ${defaultTextClass} ${className}`}
+      className={`relative inline-flex items-center justify-center shrink-0 select-none ${className}`}
       style={{
+        width: sizeVal,
+        height: sizeVal,
         ...(color ? { color } : {}),
-        ...(size ? { width: size, height: size } : {}),
       }}
     >
-      <svg
-        viewBox="0 0 100 100"
-        fill="none"
-        xmlns="http://www.w3.org/2000/svg"
-        className="w-full h-full relative z-10 overflow-visible"
-      >
-        {/* Exact Aestific continuous geometric icon mark */}
-        <path
-          d="M 54 79.5 A 32 32 0 1 1 82 48 L 82 64 A 7.5 7.5 0 0 1 67 64 L 67 48 A 17 17 0 0 0 33 48 A 17 17 0 0 0 67 48"
-          stroke="currentColor"
-          strokeWidth="6.8"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
+      {/* Light theme: crisp black icon */}
+      <img
+        src="/aestific-icon-dark.png"
+        alt="Aestific"
+        className={`w-full h-full object-contain pointer-events-none ${
+          isDark ? 'hidden' : 'block dark:hidden'
+        }`}
+      />
+      {/* Dark theme or white requested: crisp white icon */}
+      <img
+        src="/aestific-icon-white.png"
+        alt="Aestific"
+        className={`w-full h-full object-contain pointer-events-none ${
+          isDark ? 'block' : 'hidden dark:block'
+        }`}
+      />
     </div>
   );
 };
@@ -58,8 +56,42 @@ export const AestificArchIcon: React.FC<{
 export const AestificMarkIcon = AestificArchIcon;
 
 /**
+ * Authentic Aestific lowercase wordmark from the user's official logo image.
+ * Renders in pure black in light mode and pure white in dark mode.
+ */
+export const AestificWordmark: React.FC<{
+  className?: string;
+  height?: number | string;
+  color?: string;
+}> = ({ className = '', height = 18, color }) => {
+  const isDark = color === 'white' || className.includes('text-white');
+  const hStyle = typeof height === 'number' ? `${height}px` : height;
+
+  return (
+    <div className={`relative inline-flex items-center justify-center select-none ${className}`}>
+      <img
+        src="/aestific-wordmark-dark.png"
+        alt="aestific"
+        style={{ height: hStyle }}
+        className={`w-auto object-contain pointer-events-none ${
+          isDark ? 'hidden' : 'block dark:hidden'
+        }`}
+      />
+      <img
+        src="/aestific-wordmark-white.png"
+        alt="aestific"
+        style={{ height: hStyle }}
+        className={`w-auto object-contain pointer-events-none ${
+          isDark ? 'block' : 'hidden dark:block'
+        }`}
+      />
+    </div>
+  );
+};
+
+/**
  * Master Aestific Logo Component
- * - Exact reproduction of the brand logo
+ * - Exact reproduction of the brand logo from official asset
  * - Responsive to light/dark themes:
  *   - Background white -> logo & text are pure BLACK
  *   - Background black -> logo & text are pure WHITE
@@ -78,11 +110,10 @@ export const AestificLogo: React.FC<AestificLogoProps> = ({
   const isLg = size === 'lg';
   const isSm = size === 'sm';
   const isXs = size === 'xs';
+  const isSidebar = size === 'sidebar';
   const isMarkOnly = variant === 'mark-only';
   const isStacked = variant === 'stacked' || isHero || isLg;
-
-  const hasCustomTextColor = className.includes('text-');
-  const dynamicTextColor = color || hasCustomTextColor ? '' : 'text-black dark:text-white';
+  const isDark = color === 'white' || className.includes('text-white');
 
   // Mark-only mode (for compact badges, avatars, quick icons)
   if (isMarkOnly || isXs) {
@@ -90,105 +121,86 @@ export const AestificLogo: React.FC<AestificLogoProps> = ({
       <div
         onClick={onClick}
         style={{ color, ...style }}
-        className={`relative inline-flex items-center justify-center select-none ${dynamicTextColor} ${
+        className={`relative inline-flex items-center justify-center select-none ${
           onClick ? 'cursor-pointer' : ''
         } ${className}`}
       >
         <AestificArchIcon
           size={isXs ? 18 : isSm ? 22 : 28}
           color={color}
-          className={`shrink-0 ${hasCustomTextColor ? 'text-current' : ''}`}
+          className="shrink-0"
         />
       </div>
     );
   }
 
+  // Stacked layout (hero, large badges, modal headers)
+  if (isStacked) {
+    const imgHeight = isHero ? 'h-24 sm:h-28' : isLg ? 'h-16 sm:h-20' : 'h-12 sm:h-14';
+    return (
+      <div
+        onClick={onClick}
+        style={{ color, ...style }}
+        className={`relative inline-flex flex-col items-center justify-center select-none transition-transform ${
+          onClick ? 'cursor-pointer active:scale-95' : ''
+        } ${className}`}
+      >
+        <img
+          src="/aestific-logo-dark.png"
+          alt="Aestific"
+          className={`${imgHeight} w-auto object-contain pointer-events-none ${
+            isDark ? 'hidden' : 'block dark:hidden'
+          }`}
+        />
+        <img
+          src="/aestific-logo-white.png"
+          alt="Aestific"
+          className={`${imgHeight} w-auto object-contain pointer-events-none ${
+            isDark ? 'block' : 'hidden dark:block'
+          }`}
+        />
+        {(showSubtitle || showTagline) && (
+          <div className="mt-1 flex items-center justify-center">
+            <span className="font-mono text-[9px] uppercase tracking-[0.25em] text-zinc-500">
+              AI
+            </span>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // Horizontal layout (standard top bars, headers, sidebar)
+  const iconSize = isSidebar ? 21 : isSm ? 20 : isLg ? 28 : 24;
+  const wordmarkHeight = isSidebar ? 'h-[13.5px]' : isSm ? 'h-3.5' : isLg ? 'h-5' : 'h-4';
+
   return (
     <div
       onClick={onClick}
       style={{ color, ...style }}
-      className={`relative inline-flex ${
-        isStacked
-          ? 'flex-col items-center justify-center text-center'
-          : 'flex-row items-center justify-center gap-2.5 sm:gap-3'
-      } select-none ${dynamicTextColor} transition-colors ${onClick ? 'cursor-pointer' : ''} ${className}`}
+      className={`relative inline-flex flex-row items-center justify-center gap-2 sm:gap-2.5 select-none transition-colors ${
+        onClick ? 'cursor-pointer active:scale-95' : ''
+      } ${className}`}
     >
-      {/* 1. Exact Signature Emblem Icon */}
-      <div
-        className={`relative z-10 flex items-center justify-center ${
-          isHero ? 'mb-1.5 sm:mb-2' : isLg ? 'mb-1' : ''
-        }`}
-      >
-        <AestificArchIcon
-          size={
-            isHero
-              ? 42
-              : isLg
-              ? 32
-              : isSm
-              ? 22
-              : 28
-          }
-          color={color}
-          className={hasCustomTextColor ? 'text-current' : ''}
-        />
-      </div>
-
-      {/* 2. Exact "aestific" Wordmark */}
-      <div
-        className={`relative z-10 flex flex-col ${
-          isStacked ? 'items-center' : 'items-start'
-        }`}
-      >
-        <span
-          className={`lowercase font-medium tracking-[0.24em] leading-none select-none transition-colors inline-flex items-baseline ${
-            dynamicTextColor
-          } ${
-            isHero
-              ? 'text-2xl sm:text-[26px] md:text-[28px] tracking-[0.22em] pt-0.5'
-              : isLg
-              ? 'text-xl sm:text-2xl tracking-[0.22em]'
-              : isSm
-              ? 'text-base sm:text-lg tracking-[0.20em]'
-              : 'text-lg sm:text-xl tracking-[0.22em]'
+      <AestificArchIcon size={iconSize} color={color} />
+      <div className="relative flex flex-col items-start justify-center">
+        <img
+          src="/aestific-wordmark-dark.png"
+          alt="aestific"
+          className={`${wordmarkHeight} w-auto object-contain pointer-events-none ${
+            isDark ? 'hidden' : 'block dark:hidden'
           }`}
-          style={{
-            fontFamily:
-              "'Comfortaa', cursive, sans-serif",
-            color: color || (hasCustomTextColor ? 'inherit' : undefined),
-          }}
-        >
-          <span
-            className="inline-block"
-            style={{
-              fontFamily: "'Comfortaa', cursive, sans-serif",
-              fontWeight: 500,
-            }}
-          >
-            a
-          </span>
-          <span
-            style={{
-              fontFamily: "'Comfortaa', cursive, sans-serif",
-              fontWeight: 500,
-            }}
-          >
-            estific
-          </span>
-        </span>
-
-        {/* Optional Subtitle / Tagline */}
+        />
+        <img
+          src="/aestific-wordmark-white.png"
+          alt="aestific"
+          className={`${wordmarkHeight} w-auto object-contain pointer-events-none ${
+            isDark ? 'block' : 'hidden dark:block'
+          }`}
+        />
         {(showSubtitle || showTagline) && (
-          <div
-            className={`flex items-center justify-center gap-1.5 ${
-              isHero ? 'mt-2' : 'mt-0.5'
-            }`}
-          >
-            <span
-              className={`font-mono font-medium tracking-[0.2em] text-zinc-500 dark:text-zinc-400 uppercase ${
-                isHero ? 'text-[10px] sm:text-[11px]' : 'text-[8px]'
-              }`}
-            >
+          <div className="mt-0.5 flex items-center">
+            <span className="font-mono text-[8px] uppercase tracking-[0.2em] text-zinc-500">
               AI
             </span>
           </div>

@@ -23,9 +23,10 @@ import {
   type D1PreparedStatement,
   type D1Database,
   type UserPersonalization,
+  type WhatsNewItem,
 } from './db-types.js';
 
-export type { UserPersonalization };
+export type { UserPersonalization, WhatsNewItem };
 
 import {
   d1Db,
@@ -1534,7 +1535,7 @@ export class Database {
 
   // --- Guest User Session Tracking ---
 
-  async recordGuestMessage(guestId: string): Promise<GuestUserRecord> {
+  async recordGuestMessage(guestId: string, displayName?: string): Promise<GuestUserRecord> {
     if (!this.localData.guestUsers) {
       this.localData.guestUsers = [];
     }
@@ -1543,7 +1544,7 @@ export class Database {
     if (!guest) {
       guest = {
         id: guestId,
-        name: 'Guest',
+        name: displayName || 'Guest',
         email: 'guest-session@aestific.local',
         messageCount: 1,
         conversationsCount: 1,
@@ -1553,6 +1554,7 @@ export class Database {
       };
       this.localData.guestUsers.unshift(guest);
     } else {
+      if (displayName) guest.name = displayName;
       guest.messageCount = (guest.messageCount || 0) + 1;
       guest.lastActiveAt = now;
     }
@@ -1620,6 +1622,94 @@ export class Database {
     const current = this.localLocks.get(lockName);
     if (current && current.lockedBy === lockedBy) {
       this.localLocks.delete(lockName);
+      return true;
+    }
+    return false;
+  }
+
+  // --- What's New Management ---
+
+  async getAllWhatsNewItems(): Promise<WhatsNewItem[]> {
+    if (!this.localData.whatsNew) {
+      this.localData.whatsNew = [];
+    }
+    return [...this.localData.whatsNew].sort((a, b) => {
+      const dateA = new Date(a.publishedAt || a.createdAt).getTime();
+      const dateB = new Date(b.publishedAt || b.createdAt).getTime();
+      return dateB - dateA;
+    });
+  }
+
+  async getPublicWhatsNewItems(): Promise<WhatsNewItem[]> {
+    if (!this.localData.whatsNew) {
+      this.localData.whatsNew = [];
+    }
+    return this.localData.whatsNew
+      .filter((item) => item.status === 'published')
+      .sort((a, b) => {
+        const dateA = new Date(a.publishedAt || a.createdAt).getTime();
+        const dateB = new Date(b.publishedAt || b.createdAt).getTime();
+        return dateB - dateA;
+      });
+  }
+
+  async createWhatsNewItem(itemData: {
+    title: string;
+    description: string;
+    imageUrl?: string;
+    status: 'draft' | 'published' | 'unpublished';
+  }): Promise<WhatsNewItem> {
+    if (!this.localData.whatsNew) {
+      this.localData.whatsNew = [];
+    }
+    const now = new Date().toISOString();
+    const newItem: WhatsNewItem = {
+      id: `wn_${crypto.randomUUID ? crypto.randomUUID() : Date.now()}`,
+      title: itemData.title,
+      description: itemData.description,
+      imageUrl: itemData.imageUrl,
+      status: itemData.status,
+      createdAt: now,
+      publishedAt: itemData.status === 'published' ? now : undefined,
+      updatedAt: now,
+    };
+    this.localData.whatsNew.unshift(newItem);
+    this.save();
+    return newItem;
+  }
+
+  async updateWhatsNewItem(
+    id: string,
+    updates: Partial<WhatsNewItem>
+  ): Promise<WhatsNewItem | null> {
+    if (!this.localData.whatsNew) {
+      this.localData.whatsNew = [];
+    }
+    const item = this.localData.whatsNew.find((w) => w.id === id);
+    if (!item) return null;
+
+    const now = new Date().toISOString();
+    if (updates.title !== undefined) item.title = updates.title;
+    if (updates.description !== undefined) item.description = updates.description;
+    if (updates.imageUrl !== undefined) item.imageUrl = updates.imageUrl;
+
+    if (updates.status !== undefined && updates.status !== item.status) {
+      item.status = updates.status;
+      if (updates.status === 'published' && !item.publishedAt) {
+        item.publishedAt = now;
+      }
+    }
+    item.updatedAt = now;
+    this.save();
+    return item;
+  }
+
+  async deleteWhatsNewItem(id: string): Promise<boolean> {
+    if (!this.localData.whatsNew) return false;
+    const initialLen = this.localData.whatsNew.length;
+    this.localData.whatsNew = this.localData.whatsNew.filter((w) => w.id !== id);
+    if (this.localData.whatsNew.length !== initialLen) {
+      this.save();
       return true;
     }
     return false;

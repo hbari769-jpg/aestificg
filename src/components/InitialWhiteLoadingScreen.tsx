@@ -32,22 +32,13 @@ export const InitialWhiteLoadingScreen: React.FC = () => {
         }}
         className="flex flex-col items-center justify-center text-center px-4"
       >
-        {/* Emblem */}
-        <div className="relative mb-3.5 flex items-center justify-center">
-          <AestificArchIcon size={50} className="text-black" />
-        </div>
-
-        {/* Wordmark */}
-        <div className="flex flex-col items-center">
-          <span
-            className="lowercase font-medium tracking-[0.24em] text-black leading-none select-none text-2xl sm:text-[26px] inline-flex items-baseline"
-            style={{
-              fontFamily: "'Comfortaa', 'Outfit', system-ui, -apple-system, sans-serif",
-            }}
-          >
-            <span style={{ fontFamily: "'Comfortaa', 'Outfit', cursive, sans-serif", fontWeight: 500 }}>a</span>
-            <span style={{ fontFamily: "'Comfortaa', 'Outfit', cursive, sans-serif", fontWeight: 500 }}>estific</span>
-          </span>
+        {/* Authentic Official Aestific Logo & Wordmark */}
+        <div className="relative mb-2 flex items-center justify-center">
+          <img
+            src="/aestific-logo-dark.png"
+            alt="aestific"
+            className="w-32 sm:w-36 h-auto object-contain select-none"
+          />
         </div>
       </motion.div>
     </motion.div>

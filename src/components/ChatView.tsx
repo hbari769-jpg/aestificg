@@ -1037,10 +1037,14 @@ export const ChatView: React.FC<ChatViewProps> = ({
     setOriginalPromptText(textToEnhance);
 
     try {
+      const recentMessages = messages.slice(-6).map((m) => ({
+        role: m.role || m.sender,
+        content: m.content,
+      }));
       const res = await fetch('/api/enhance', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: textToEnhance }),
+        body: JSON.stringify({ prompt: textToEnhance, history: recentMessages }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -1770,26 +1774,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
             </span>
           ) : null}
 
-          {messages.length > 0 && onExportChat && (
-            <button
-              onClick={onExportChat}
-              className="p-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-all cursor-pointer"
-              title="Export Conversation"
-            >
-              <Download className="w-4 h-4" />
-            </button>
-          )}
-
-          {messages.length > 0 && onClearChat && (
-            <button
-              onClick={onClearChat}
-              className="p-2 rounded-xl bg-zinc-100 hover:bg-rose-50 dark:bg-white/5 dark:hover:bg-rose-500/15 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:text-rose-600 dark:hover:text-rose-400 transition-all cursor-pointer"
-              title="Clear Thread"
-            >
-              <Trash2 className="w-4 h-4" />
-            </button>
-          )}
-
           {/* Guest Log In Button */}
           {!user && onOpenAuth && (
             <button
@@ -1801,31 +1785,6 @@ export const ChatView: React.FC<ChatViewProps> = ({
               Log In
             </button>
           )}
-
-          {/* Working Light / Dark Theme Toggle Button */}
-          <button
-            type="button"
-            onClick={toggleTheme}
-            className="p-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-all cursor-pointer flex items-center justify-center shrink-0"
-            title={isDark ? 'Switch to Light theme' : 'Switch to Dark theme'}
-            aria-label={isDark ? 'Switch to Light theme' : 'Switch to Dark theme'}
-          >
-            {isDark ? (
-              <Sun className="w-4 h-4 text-amber-400 transition-transform hover:rotate-45" />
-            ) : (
-              <Moon className="w-4 h-4 text-zinc-700 transition-transform hover:-rotate-12" />
-            )}
-          </button>
-
-          {/* Settings Icon Button */}
-          <button
-            onClick={onOpenSettings}
-            className="p-2 rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-white/5 dark:hover:bg-white/10 border border-zinc-200 dark:border-white/10 text-zinc-700 dark:text-zinc-300 hover:text-black dark:hover:text-white transition-all cursor-pointer"
-            title={t('settings')}
-            aria-label="Settings"
-          >
-            <Settings className="w-4 h-4" />
-          </button>
         </div>
       </div>
 
@@ -2463,6 +2422,26 @@ export const ChatView: React.FC<ChatViewProps> = ({
                     bottomTextareaRef.current?.focus();
                   }
                 }}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  if (!user) {
+                    showToast('Please log in to upload files and photos', 'info');
+                    onOpenAuth?.('login');
+                    return;
+                  }
+                  const files = Array.from(e.dataTransfer.files);
+                  if (files.length > 0 && onUploadFile) {
+                    files.forEach(file => {
+                      const tempId = `uploading_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+                      onUploadFile(file); // Trigger upload
+                    });
+                  }
+                }}
                 className="aestific-composer-inner px-2.5 sm:px-3.5 py-1.5 sm:py-2 flex flex-col justify-center text-left cursor-text"
               >
                 {/* Replying to quote preview */}
@@ -2810,6 +2789,23 @@ export const ChatView: React.FC<ChatViewProps> = ({
           >
             <Globe className="w-3.5 h-3.5 text-emerald-400" />
             <span>Translate</span>
+          </button>
+
+          <div className="w-px h-3.5 bg-white/20 mx-0.5" />
+
+          <button
+            type="button"
+            onClick={() => {
+              const textToInsert = `"${selectedText}" Verify it`;
+              setInputText((prev) => (prev ? `${prev} ${textToInsert}` : textToInsert));
+              setToolbarPosition(null);
+              window.getSelection()?.removeAllRanges();
+              bottomTextareaRef.current?.focus();
+            }}
+            className="flex items-center gap-1.5 px-2.5 py-0.5 text-xs font-medium hover:bg-white/10 rounded-full transition-colors cursor-pointer"
+          >
+            <ShieldCheck className="w-3.5 h-3.5 text-red-400" />
+            <span>Verify</span>
           </button>
 
           <div className="w-px h-3.5 bg-white/20 mx-0.5" />

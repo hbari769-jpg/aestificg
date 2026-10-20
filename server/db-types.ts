@@ -242,6 +242,17 @@ export interface SystemTelemetry {
   timeline: AnalyticsDataPoint[]; // Last 14 days of data for charts
 }
 
+export interface WhatsNewItem {
+  id: string;
+  title: string;
+  description: string;
+  imageUrl?: string;
+  status: 'draft' | 'published' | 'unpublished';
+  createdAt: string;
+  publishedAt?: string;
+  updatedAt: string;
+}
+
 export interface DatabaseSchema {
   users: User[];
   conversations: Conversation[];
@@ -253,6 +264,7 @@ export interface DatabaseSchema {
   adminLogs: AdminLog[];
   supportTickets: SupportTicket[];
   guestUsers?: GuestUserRecord[];
+  whatsNew?: WhatsNewItem[];
 }
 
 export interface D1PreparedStatement {

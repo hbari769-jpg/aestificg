@@ -15,13 +15,15 @@ import { SettingsModal } from './components/SettingsModal';
 import { ImageGenerationModal } from './components/ImageGenerationModal';
 import { AuthModal } from './components/AuthModal';
 import { GuestLimitModal } from './components/GuestLimitModal';
-import { CinematicLandingPage } from './components/CinematicLandingPage';
+import { StaticLandingPage } from './components/StaticLandingPage';
+import { GuestDisplayNameModal } from './components/GuestDisplayNameModal';
 import { SplashScreen } from './components/SplashScreen';
 import { InitialWhiteLoadingScreen } from './components/InitialWhiteLoadingScreen';
 import { TermsBanner } from './components/TermsBanner';
 import { TermsPage } from './components/TermsPage';
 import { SecretVerifyPage } from './components/SecretVerifyPage';
 import { SupportCenterPage } from './components/SupportCenterPage';
+import { WhatsNewBlankPage } from './components/WhatsNewBlankPage';
 import { SpatialAtmosphere } from './components/SpatialAtmosphere';
 import { AestificLogo } from './components/AestificLogo';
 import { Ban } from 'lucide-react';
@@ -91,7 +93,9 @@ function MainApp() {
   const [pendingLandingPrompt, setPendingLandingPrompt] = useState<string | null>(null);
 
   // Guest Mode State - Default to true so instant functional AI chat loads immediately
-  const [guestStarted, setGuestStarted] = useState<boolean>(true);
+  const [guestStarted, setGuestStarted] = useState<boolean>(false);
+  const [isGuestNameModalOpen, setIsGuestNameModalOpen] = useState(false);
+  const [guestDisplayName, setGuestDisplayName] = useState<string | null>(null);
   const [guestMessageCount, setGuestMessageCount] = useState<number>(() => {
     const val = localStorage.getItem('aestific_guest_message_count');
     return val ? parseInt(val, 10) || 0 : 0;
@@ -1901,8 +1905,7 @@ function MainApp() {
   };
 
   const handleLandingGetStarted = () => {
-    setGuestStarted(true);
-    setActiveView('chat');
+    setIsGuestNameModalOpen(true);
   };
 
   const activeConversation = conversations.find((c) => c.id === activeConversationId) || null;
@@ -1912,11 +1915,12 @@ function MainApp() {
       {showInitialWhiteLoading ? (
         <InitialWhiteLoadingScreen />
       ) : activeView === 'landing' ? (
-        <CinematicLandingPage
+        <StaticLandingPage
           user={user}
           onGetStarted={handleLandingGetStarted}
           onOpenAuth={(mode) => handleOpenAuth(mode || 'login')}
           onStartWithPrompt={handleStartWithPrompt}
+          onSelectView={setActiveView}
         />
       ) : user?.isBanned || (user as any)?.status === 'banned' ? (
         <div className="h-[100dvh] w-full bg-white dark:bg-black flex flex-col items-center justify-center p-6 text-center text-zinc-900 dark:text-white relative transition-colors">
@@ -2062,6 +2066,10 @@ function MainApp() {
               />
             )}
 
+            {activeView === 'whatsNew' && (
+              <WhatsNewBlankPage onClose={() => setActiveView('chat')} />
+            )}
+
             {activeView === 'support' && (
               <SupportCenterPage
                 user={user}
@@ -2200,6 +2208,16 @@ function MainApp() {
         onLogIn={() => {
           setShowGuestLimitModal(false);
           handleOpenAuth('login');
+        }}
+      />
+      <GuestDisplayNameModal
+        isOpen={isGuestNameModalOpen}
+        onClose={() => setIsGuestNameModalOpen(false)}
+        onContinue={(name) => {
+          setGuestDisplayName(name);
+          setGuestStarted(true);
+          setIsGuestNameModalOpen(false);
+          setActiveView('chat');
         }}
       />
     </div>

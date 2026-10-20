@@ -50,6 +50,7 @@ import {
   Copy,
   Cpu,
   RotateCcw,
+  Newspaper,
 } from 'lucide-react';
 import {
   AreaChart,
@@ -201,7 +202,7 @@ export const SecretVerifyPage: React.FC<SecretVerifyPageProps> = ({ onBackToApp 
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Admin Dashboard Tabs: 'overview' | 'monitoring' | 'analytics' | 'behavior' | 'users' | 'documents' | 'support' | 'email' | 'logs' | 'security'
-  const [adminTab, setAdminTab] = useState<'overview' | 'monitoring' | 'analytics' | 'behavior' | 'users' | 'documents' | 'support' | 'email' | 'logs' | 'security'>('overview');
+  const [adminTab, setAdminTab] = useState<'overview' | 'monitoring' | 'analytics' | 'behavior' | 'users' | 'documents' | 'support' | 'email' | 'logs' | 'security' | 'whatsNew'>('overview');
   const [editableDocs, setEditableDocs] = useState<Record<DocTab, EditableDocumentItem>>(() =>
     getCachedEditableDocuments()
   );
@@ -213,6 +214,123 @@ export const SecretVerifyPage: React.FC<SecretVerifyPageProps> = ({ onBackToApp 
   const [searchUserQuery, setSearchUserQuery] = useState<string>('');
   const [userPlanFilter, setUserPlanFilter] = useState<string>('all');
   const [userStatusFilter, setUserStatusFilter] = useState<'all' | 'active' | 'banned'>('all');
+
+  // What's New Management State
+  const [whatsNewItems, setWhatsNewItems] = useState<any[]>([]);
+  const [isLoadingWhatsNew, setIsLoadingWhatsNew] = useState<boolean>(false);
+  const [showWhatsNewModal, setShowWhatsNewModal] = useState<boolean>(false);
+  const [editingWhatsNew, setEditingWhatsNew] = useState<any | null>(null);
+  const [whatsNewTitle, setWhatsNewTitle] = useState<string>('');
+  const [whatsNewDesc, setWhatsNewDesc] = useState<string>('');
+  const [whatsNewImageUrl, setWhatsNewImageUrl] = useState<string>('');
+  const [whatsNewStatus, setWhatsNewStatus] = useState<'draft' | 'published' | 'unpublished'>('draft');
+  const [isUploadingWhatsNewImage, setIsUploadingWhatsNewImage] = useState<boolean>(false);
+
+  const fetchWhatsNewAdmin = async () => {
+    try {
+      setIsLoadingWhatsNew(true);
+      const res = await adminFetch('/api/admin/whats-new');
+      if (res.ok) {
+        const data = await res.json();
+        setWhatsNewItems(data.items || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch What\'s New items:', err);
+    } finally {
+      setIsLoadingWhatsNew(false);
+    }
+  };
+
+  const handleSaveWhatsNew = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!whatsNewTitle.trim() || !whatsNewDesc.trim()) {
+      showToast('Title and description are required.', 'error');
+      return;
+    }
+    try {
+      const payload = {
+        title: whatsNewTitle.trim(),
+        description: whatsNewDesc.trim(),
+        imageUrl: whatsNewImageUrl.trim() || undefined,
+        status: whatsNewStatus,
+      };
+
+      let res;
+      if (editingWhatsNew) {
+        res = await adminFetch(`/api/admin/whats-new/${editingWhatsNew.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      } else {
+        res = await adminFetch('/api/admin/whats-new', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+      }
+
+      if (res.ok) {
+        showToast(editingWhatsNew ? 'Update modified successfully.' : 'Update created successfully.', 'success');
+        setShowWhatsNewModal(false);
+        setEditingWhatsNew(null);
+        setWhatsNewTitle('');
+        setWhatsNewDesc('');
+        setWhatsNewImageUrl('');
+        setWhatsNewStatus('draft');
+        fetchWhatsNewAdmin();
+      } else {
+        const errData = await res.json();
+        showToast(errData.error || 'Failed to save update.', 'error');
+      }
+    } catch (err) {
+      showToast('Failed to save update.', 'error');
+    }
+  };
+
+  const handleDeleteWhatsNew = async (id: string) => {
+    if (!window.confirm('Are you sure you want to permanently delete this update?')) return;
+    try {
+      const res = await adminFetch(`/api/admin/whats-new/${id}`, {
+        method: 'DELETE',
+      });
+      if (res.ok) {
+        showToast('Update deleted.', 'success');
+        fetchWhatsNewAdmin();
+      } else {
+        showToast('Failed to delete update.', 'error');
+      }
+    } catch (err) {
+      showToast('Failed to delete update.', 'error');
+    }
+  };
+
+  const handleUploadWhatsNewImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      setIsUploadingWhatsNewImage(true);
+      const formData = new FormData();
+      formData.append('file', file);
+      const res = await adminFetch('/api/files/upload', {
+        method: 'POST',
+        body: formData,
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.file && data.file.url) {
+          setWhatsNewImageUrl(data.file.url);
+          showToast('Image uploaded successfully.', 'success');
+        }
+      } else {
+        showToast('Image upload failed.', 'error');
+      }
+    } catch (err) {
+      showToast('Image upload failed.', 'error');
+    } finally {
+      setIsUploadingWhatsNewImage(false);
+    }
+  };
 
   // User Inspector Modal State
   const [inspectModalUser, setInspectModalUser] = useState<any | null>(null);
@@ -1288,6 +1406,7 @@ export const SecretVerifyPage: React.FC<SecretVerifyPageProps> = ({ onBackToApp 
               { id: 'support', label: 'Support Desk Messages', icon: Headphones },
               { id: 'email', label: 'Direct Email Sender', icon: Mail },
               { id: 'logs', label: 'Admin Audit Logs', icon: History },
+              { id: 'whatsNew', label: 'What\'s New Manager', icon: Newspaper },
               { id: 'security', label: 'Passcodes & Admin Bans', icon: KeyRound },
             ].map((tab) => {
               const Icon = tab.icon;
@@ -1300,6 +1419,7 @@ export const SecretVerifyPage: React.FC<SecretVerifyPageProps> = ({ onBackToApp 
                     if (tab.id === 'documents') fetchPlatformDocuments();
                     if (tab.id === 'support') fetchSupportTickets();
                     if (tab.id === 'logs') fetchAuditLogs();
+                    if (tab.id === 'whatsNew') fetchWhatsNewAdmin();
                     if (tab.id === 'security') {
                       fetchPasscodes();
                       fetchBannedAdmins();
@@ -1343,6 +1463,7 @@ export const SecretVerifyPage: React.FC<SecretVerifyPageProps> = ({ onBackToApp 
             { id: 'support', label: 'Support', icon: Headphones },
             { id: 'email', label: 'Email', icon: Mail },
             { id: 'logs', label: 'Logs', icon: History },
+            { id: 'whatsNew', label: 'WhatsNew', icon: Newspaper },
             { id: 'security', label: 'Security', icon: KeyRound },
           ].map((tab) => (
             <button
@@ -1352,6 +1473,7 @@ export const SecretVerifyPage: React.FC<SecretVerifyPageProps> = ({ onBackToApp 
                 if (tab.id === 'documents') fetchPlatformDocuments();
                 if (tab.id === 'support') fetchSupportTickets();
                 if (tab.id === 'logs') fetchAuditLogs();
+                if (tab.id === 'whatsNew') fetchWhatsNewAdmin();
                 if (tab.id === 'security') {
                   fetchPasscodes();
                   fetchBannedAdmins();
@@ -3059,6 +3181,140 @@ export const SecretVerifyPage: React.FC<SecretVerifyPageProps> = ({ onBackToApp 
           {/* ================================================================= */}
           {adminTab === 'behavior' && (
             <AdminBehaviorCenter adminFetch={adminFetch} />
+          )}
+
+          {/* TAB: WHAT'S NEW MANAGER */}
+          {adminTab === 'whatsNew' && (
+            <div className="max-w-6xl mx-auto space-y-6">
+              <div className="flex justify-between items-center">
+                <h2 className="text-xl font-bold text-white font-mono flex items-center gap-2">
+                  <Newspaper className="w-5 h-5 text-red-500" />
+                  What's New Manager
+                </h2>
+                <button
+                  onClick={() => {
+                    setEditingWhatsNew(null);
+                    setWhatsNewTitle('');
+                    setWhatsNewDesc('');
+                    setWhatsNewImageUrl('');
+                    setWhatsNewStatus('draft');
+                    setShowWhatsNewModal(true);
+                  }}
+                  className="px-4 py-2 bg-red-950 text-red-200 border border-red-800 rounded-xl text-xs font-mono font-semibold hover:bg-red-900 cursor-pointer"
+                >
+                  Add New Update
+                </button>
+              </div>
+
+              <div className="bg-zinc-900 rounded-2xl border border-zinc-800 overflow-hidden">
+                <table className="w-full text-left text-xs font-mono text-zinc-300">
+                  <thead className="bg-zinc-950 text-zinc-500">
+                    <tr>
+                      <th className="p-3">Title</th>
+                      <th className="p-3">Status</th>
+                      <th className="p-3">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {whatsNewItems.map((item) => (
+                      <tr key={item.id} className="border-t border-zinc-800">
+                        <td className="p-3 text-white font-medium">{item.title}</td>
+                        <td className="p-3">
+                          <span className={`px-2 py-1 rounded text-[10px] ${item.status === 'published' ? 'bg-emerald-950 text-emerald-200' : 'bg-zinc-800 text-zinc-400'}`}>
+                            {item.status}
+                          </span>
+                        </td>
+                        <td className="p-3 flex gap-2">
+                          <button
+                            onClick={() => {
+                              setEditingWhatsNew(item);
+                              setWhatsNewTitle(item.title);
+                              setWhatsNewDesc(item.description);
+                              setWhatsNewImageUrl(item.imageUrl || '');
+                              setWhatsNewStatus(item.status);
+                              setShowWhatsNewModal(true);
+                            }}
+                            className="text-blue-400 hover:text-blue-300 cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => handleDeleteWhatsNew(item.id)}
+                            className="text-red-400 hover:text-red-300 cursor-pointer"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {/* What's New Create/Edit Modal */}
+              <AnimatePresence>
+                {showWhatsNewModal && (
+                  <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+                    <motion.form
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      onSubmit={handleSaveWhatsNew}
+                      className="bg-zinc-900 border border-zinc-800 rounded-2xl p-6 w-full max-w-lg space-y-4"
+                    >
+                      <h3 className="text-lg font-bold text-white font-mono">
+                        {editingWhatsNew ? 'Edit Update' : 'Add New Update'}
+                      </h3>
+                      <input
+                        type="text"
+                        placeholder="Title"
+                        value={whatsNewTitle}
+                        onChange={(e) => setWhatsNewTitle(e.target.value)}
+                        className="w-full p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-white font-mono text-xs"
+                      />
+                      <textarea
+                        placeholder="Description"
+                        value={whatsNewDesc}
+                        onChange={(e) => setWhatsNewDesc(e.target.value)}
+                        className="w-full p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-white font-mono text-xs h-24"
+                      />
+                      <input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleUploadWhatsNewImage}
+                        className="text-zinc-400 text-xs"
+                      />
+                      {isUploadingWhatsNewImage && <p className="text-xs text-zinc-500">Uploading...</p>}
+                      {whatsNewImageUrl && <img src={whatsNewImageUrl} className="h-20 rounded" />}
+                      <select
+                        value={whatsNewStatus}
+                        onChange={(e) => setWhatsNewStatus(e.target.value as any)}
+                        className="w-full p-2 rounded-lg bg-zinc-800 border border-zinc-700 text-white font-mono text-xs"
+                      >
+                        <option value="draft">Draft</option>
+                        <option value="published">Published</option>
+                        <option value="unpublished">Unpublished</option>
+                      </select>
+                      <div className="flex gap-2 justify-end pt-4">
+                        <button
+                          type="button"
+                          onClick={() => setShowWhatsNewModal(false)}
+                          className="px-4 py-2 bg-zinc-800 text-zinc-300 rounded-lg text-xs font-mono"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-2 bg-red-950 text-red-200 border border-red-800 rounded-lg text-xs font-mono"
+                        >
+                          Save
+                        </button>
+                      </div>
+                    </motion.form>
+                  </div>
+                )}
+              </AnimatePresence>
+            </div>
           )}
         </main>
       </div>

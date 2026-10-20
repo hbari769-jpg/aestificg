@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { AestificLogo, AestificArchIcon } from './AestificLogo';
+import { AestificLogo, AestificArchIcon, AestificWordmark } from './AestificLogo';
 import { SpatialAtmosphere } from './SpatialAtmosphere';
 import {
   Mail,
@@ -334,17 +334,9 @@ export const AuthModal: React.FC<AuthModalProps> = ({
             <AestificArchIcon size={38} className="relative z-10" />
           </div>
 
-          {/* Refined, smaller "aestific" lowercase wordmark */}
-          <div className="flex flex-col items-center">
-            <span
-              className="lowercase font-medium tracking-[0.24em] text-black dark:text-white leading-none select-none text-xl sm:text-[22px] inline-flex items-baseline"
-              style={{
-                fontFamily: "'Comfortaa', 'Outfit', system-ui, -apple-system, sans-serif",
-              }}
-            >
-              <span style={{ fontFamily: "'Comfortaa', 'Outfit', cursive, sans-serif", fontWeight: 500 }}>a</span>
-              <span style={{ fontFamily: "'Comfortaa', 'Outfit', cursive, sans-serif", fontWeight: 500 }}>estific</span>
-            </span>
+          {/* Exact authentic wordmark from the user's Aestific logo picture */}
+          <div className="flex flex-col items-center mt-1">
+            <AestificWordmark height={20} />
           </div>
 
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-2 max-w-xs leading-relaxed">

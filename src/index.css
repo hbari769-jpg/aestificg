@@ -126,20 +126,20 @@ html.dark .aestific-composer-dock:focus-within,
   box-shadow: 0 14px 40px -4px rgba(0, 0, 0, 0.88), 0 0 0 1px rgba(255, 255, 255, 0.12);
 }
 
-/* Light mode: Clean white with subtle glow (NO border color rotation on click/focus) */
+/* Light mode: Pure white with static neutral border (no blue color change on click/focus) */
 html.light .aestific-composer-dock,
 [data-theme="light"] .aestific-composer-dock {
   background-color: #ffffff !important;
-  border: 1px solid rgba(228, 228, 231, 0.95);
-  box-shadow: 0 0 0 1px rgba(59, 130, 246, 0.14), 0 8px 30px -4px rgba(37, 99, 235, 0.09), 0 2px 10px rgba(0, 0, 0, 0.03);
+  border: 1px solid #e4e4e7;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 4px 12px -2px rgba(0, 0, 0, 0.02);
 }
 
 html.light .aestific-composer-dock.is-active,
 html.light .aestific-composer-dock:focus-within,
 [data-theme="light"] .aestific-composer-dock.is-active,
 [data-theme="light"] .aestific-composer-dock:focus-within {
-  border-color: rgba(59, 130, 246, 0.45);
-  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25), 0 14px 38px -4px rgba(37, 99, 235, 0.15);
+  border: 1px solid #e4e4e7;
+  box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 4px 12px -2px rgba(0, 0, 0, 0.02);
 }
 
 /* Flowing Aestific Enhance Gradient Beam:

@@ -18,7 +18,7 @@ import {
   Archive,
   LogOut,
   FileText,
-  Sparkles,
+  Newspaper,
 } from 'lucide-react';
 import { Conversation, User, ActiveView } from '../types';
 import { AestificLogo } from './AestificLogo';
@@ -262,7 +262,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
               onNewChat();
             }}
           >
-            <AestificLogo size="md" variant="horizontal" />
+            <AestificLogo size="sidebar" variant="horizontal" />
           </div>
 
           {isOpenMobile && (
@@ -359,25 +359,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <span>{t('pictureStudio')}</span>
           </button>
 
-          <button
-            onClick={() => {
-              onSelectView('landing');
-              if (onCloseMobile) onCloseMobile();
-            }}
-            className={`w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
-              activeView === 'landing'
-                ? 'bg-zinc-100 text-zinc-950 font-semibold border border-zinc-200/80 dark:bg-white/10 dark:text-white dark:border-white/10'
-                : 'text-zinc-600 hover:text-zinc-950 hover:bg-zinc-100/70 dark:text-zinc-400 dark:hover:text-white dark:hover:bg-white/5 border border-transparent'
-            }`}
-          >
-            <div className="flex items-center gap-2.5">
-              <Sparkles className="w-4 h-4 shrink-0 text-purple-500" />
-              <span>Aestific Enhance</span>
-            </div>
-            <span className="text-[10px] px-1.5 py-0.5 rounded font-mono bg-purple-500/10 text-purple-600 dark:text-purple-300">
-              Showcase
-            </span>
-          </button>
 
           <button
             onClick={() => {
@@ -412,6 +393,20 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <FileText className="w-4 h-4 shrink-0" />
             <span>{t('tabDocuments') || 'Documents'}</span>
+          </button>
+          <button
+            onClick={() => {
+              onSelectView('whatsNew');
+              if (onCloseMobile) onCloseMobile();
+            }}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs font-medium transition-colors cursor-pointer ${
+              activeView === 'whatsNew'
+                ? 'bg-zinc-100 text-zinc-950 font-semibold border border-zinc-200/80 dark:bg-white/10 dark:text-white dark:border-white/10'
+                : 'text-zinc-600 hover:text-zinc-950 hover:bg-zinc-100/70 dark:text-zinc-400 dark:hover:text-white dark:hover:bg-white/5 border border-transparent'
+            }`}
+          >
+            <Newspaper className="w-4 h-4 shrink-0" />
+            <span>What's New</span>
           </button>
         </div>
 

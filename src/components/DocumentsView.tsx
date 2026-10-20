@@ -178,7 +178,7 @@ export const DocumentsView: React.FC<DocumentsViewProps> = ({
             </div>
           )}
 
-          {/* 7 Vertical Buttons ("khali ei buttongula niche niche ashbe") */}
+          {/* 7 Vertical Buttons */}
           <div className="space-y-2.5">
             {DOC_ITEMS.map((item) => {
               const Icon = item.icon;
