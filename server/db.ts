@@ -117,6 +117,7 @@ export class Database {
   private configured: boolean = false;
   private configError: string | null = null;
   private localData: DatabaseSchema;
+  private lastMtime: number = 0;
 
   constructor(options?: DatabaseOptions) {
     const forcedMode = options?.mode;
@@ -279,18 +280,31 @@ export class Database {
     };
   }
 
+  public refreshLocalDataIfNeeded(): void {
+    if (this.mode === 'local-dev' || !this.d1) {
+      try {
+        if (fs.existsSync(DB_FILE)) {
+          const stat = fs.statSync(DB_FILE);
+          if (stat.mtimeMs > this.lastMtime) {
+            this.localData = this.loadLocalData();
+            this.lastMtime = stat.mtimeMs;
+          }
+        }
+      } catch {
+        // Ignore read error
+      }
+    }
+  }
+
   private loadLocalData(): DatabaseSchema {
     try {
       if (fs.existsSync(DB_FILE)) {
         const raw = fs.readFileSync(DB_FILE, 'utf-8');
         const parsed = JSON.parse(raw);
         const rawUsers: User[] = Array.isArray(parsed.users) ? parsed.users : [];
-        // Strictly filter to genuine human @gmail.com accounts; disconnect and purge test/mock accounts
         const genuineUsers = rawUsers.filter((u) => {
           const email = (u.email || '').toLowerCase().trim();
-          const isGmail = email.endsWith('@gmail.com') || email.endsWith('@googlemail.com');
-          const isMock = email.includes('dev-demo') || email.includes('test') || email.includes('example.com') || email.includes('aestific.local');
-          return isGmail && !isMock;
+          return Boolean(email && email.includes('@'));
         });
 
         const schema: DatabaseSchema = {
@@ -306,14 +320,6 @@ export class Database {
           guestUsers: Array.isArray(parsed.guestUsers) ? parsed.guestUsers : [],
         };
 
-        if (genuineUsers.length !== rawUsers.length) {
-          try {
-            fs.writeFileSync(DB_FILE, JSON.stringify(schema, null, 2), 'utf-8');
-          } catch {
-            // Ignore
-          }
-        }
-
         return schema;
       }
     } catch (e) {
@@ -325,6 +331,11 @@ export class Database {
   public save(): void {
     try {
       fs.writeFileSync(DB_FILE, JSON.stringify(this.localData, null, 2), 'utf-8');
+      try {
+        this.lastMtime = fs.statSync(DB_FILE).mtimeMs;
+      } catch {
+        this.lastMtime = Date.now();
+      }
     } catch (e) {
       console.error('[Database] Failed to write local fallback DB:', e);
     }
@@ -441,23 +452,20 @@ export class Database {
   }
 
   async getAllUsers(): Promise<User[]> {
-    const users = await this.executeWithD1(
+    return this.executeWithD1(
       (d1) => d1Db.getAllUsers(d1),
-      () => [...this.localData.users]
+      () => {
+        this.refreshLocalDataIfNeeded();
+        return [...this.localData.users];
+      }
     );
-    // Retain only genuine human users with @gmail.com accounts; disconnect test/dummy users
-    return users.filter((u) => {
-      const email = (u.email || '').toLowerCase().trim();
-      const isGmail = email.endsWith('@gmail.com') || email.endsWith('@googlemail.com');
-      const isMock = email.includes('dev-demo') || email.includes('test') || email.includes('example.com') || email.includes('aestific.local');
-      return isGmail && !isMock;
-    });
   }
 
   async findUserByEmail(email: string): Promise<User | null> {
     return this.executeWithD1(
       (d1) => d1Db.findUserByEmail(d1, email),
       () => {
+        this.refreshLocalDataIfNeeded();
         const clean = (email || '').toLowerCase().trim();
         return this.localData.users.find((u) => u.email.toLowerCase().trim() === clean) || null;
       }
@@ -467,7 +475,10 @@ export class Database {
   async findUserById(id: string): Promise<User | null> {
     return this.executeWithD1(
       (d1) => d1Db.findUserById(d1, id),
-      () => this.localData.users.find((u) => u.id === id) || null
+      () => {
+        this.refreshLocalDataIfNeeded();
+        return this.localData.users.find((u) => u.id === id) || null;
+      }
     );
   }
 
@@ -475,13 +486,13 @@ export class Database {
     user: Omit<User, 'id' | 'createdAt' | 'status'> & { status?: 'active' | 'suspended' | 'banned' }
   ): Promise<User> {
     const cleanEmail = (user.email || '').toLowerCase().trim();
-    const isGmail = cleanEmail.endsWith('@gmail.com') || cleanEmail.endsWith('@googlemail.com');
-    if (!isGmail || cleanEmail.includes('dev-demo') || cleanEmail.includes('test@') || cleanEmail.includes('example.com')) {
-      throw new Error('Only genuine human @gmail.com accounts are permitted.');
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      throw new Error('A valid email address is required.');
     }
     return this.executeWithD1(
       (d1) => d1Db.createUser(d1, user),
       () => {
+        this.refreshLocalDataIfNeeded();
         const id = crypto.randomUUID();
         const now = new Date().toISOString();
         const newUser: User = {
@@ -506,6 +517,7 @@ export class Database {
     return this.executeWithD1(
       (d1) => d1Db.updateUser(d1, id, updates),
       () => {
+        this.refreshLocalDataIfNeeded();
         const user = this.localData.users.find((u) => u.id === id);
         if (!user) return null;
         if (updates.status !== undefined) {
@@ -521,15 +533,17 @@ export class Database {
   }
 
   async touchUserActivity(userId: string): Promise<void> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.touchUserActivity(d1, userId);
-    }
-    const user = this.localData.users.find((u) => u.id === userId);
-    if (user) {
-      user.lastActiveAt = new Date().toISOString();
-      this.save();
-    }
+    return this.executeWithD1(
+      (d1) => d1Db.touchUserActivity(d1, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const user = this.localData.users.find((u) => u.id === userId);
+        if (user) {
+          user.lastActiveAt = new Date().toISOString();
+          this.save();
+        }
+      }
+    );
   }
 
   generateVerificationCode(): string {
@@ -541,104 +555,114 @@ export class Database {
   }
 
   async setVerificationCode(userId: string, code: string): Promise<void> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.setVerificationCode(d1, userId, code);
-    }
-    const user = this.localData.users.find((u) => u.id === userId);
-    if (!user) return;
-    const now = Date.now();
-    user.verificationCodeHash = this.hashVerificationCode(code, userId);
-    user.verificationCodeExpiresAt = now + 15 * 60 * 1000;
-    user.lastVerificationSentAt = now;
-    user.verificationAttempts = 0;
-    this.save();
+    return this.executeWithD1(
+      (d1) => d1Db.setVerificationCode(d1, userId, code),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const user = this.localData.users.find((u) => u.id === userId);
+        if (!user) return;
+        const now = Date.now();
+        user.verificationCodeHash = this.hashVerificationCode(code, userId);
+        user.verificationCodeExpiresAt = now + 15 * 60 * 1000;
+        user.lastVerificationSentAt = now;
+        user.verificationAttempts = 0;
+        this.save();
+      }
+    );
   }
 
   async canResendVerification(
     userId: string,
     cooldownMs = 60000
   ): Promise<{ allowed: boolean; waitSeconds?: number }> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.canResendVerification(d1, userId, cooldownMs);
-    }
-    const user = this.localData.users.find((u) => u.id === userId);
-    if (!user || !user.lastVerificationSentAt) return { allowed: true };
-    const elapsed = Date.now() - user.lastVerificationSentAt;
-    if (elapsed < cooldownMs) {
-      return { allowed: false, waitSeconds: Math.ceil((cooldownMs - elapsed) / 1000) };
-    }
-    return { allowed: true };
+    return this.executeWithD1(
+      (d1) => d1Db.canResendVerification(d1, userId, cooldownMs),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const user = this.localData.users.find((u) => u.id === userId);
+        if (!user || !user.lastVerificationSentAt) return { allowed: true };
+        const elapsed = Date.now() - user.lastVerificationSentAt;
+        if (elapsed < cooldownMs) {
+          return { allowed: false, waitSeconds: Math.ceil((cooldownMs - elapsed) / 1000) };
+        }
+        return { allowed: true };
+      }
+    );
   }
 
   async verifyEmailCode(
     email: string,
     rawCode: string
   ): Promise<{ success: boolean; user?: User; error?: string }> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.verifyEmailCode(d1, email, rawCode);
-    }
-    const user = await this.findUserByEmail(email);
-    if (!user) return { success: false, error: 'User not found' };
+    return this.executeWithD1(
+      (d1) => d1Db.verifyEmailCode(d1, email, rawCode),
+      async () => {
+        this.refreshLocalDataIfNeeded();
+        const user = await this.findUserByEmail(email);
+        if (!user) return { success: false, error: 'User not found' };
 
-    const attempts = user.verificationAttempts || 0;
-    if (attempts >= 5) {
-      return { success: false, error: 'Maximum verification attempts exceeded. Please request a new code.' };
-    }
+        const attempts = user.verificationAttempts || 0;
+        if (attempts >= 5) {
+          return { success: false, error: 'Maximum verification attempts exceeded. Please request a new code.' };
+        }
 
-    if (!user.verificationCodeExpiresAt || Date.now() > user.verificationCodeExpiresAt) {
-      return { success: false, error: 'Verification code has expired. Please request a new one.' };
-    }
+        if (!user.verificationCodeExpiresAt || Date.now() > user.verificationCodeExpiresAt) {
+          return { success: false, error: 'Verification code has expired. Please request a new one.' };
+        }
 
-    const inputHash = this.hashVerificationCode(rawCode, user.id);
-    if (inputHash !== user.verificationCodeHash) {
-      user.verificationAttempts = attempts + 1;
-      this.save();
-      const remaining = 5 - user.verificationAttempts;
-      return { success: false, error: `Invalid verification code. ${remaining} attempt(s) remaining.` };
-    }
+        const inputHash = this.hashVerificationCode(rawCode, user.id);
+        if (inputHash !== user.verificationCodeHash) {
+          user.verificationAttempts = attempts + 1;
+          this.save();
+          const remaining = 5 - user.verificationAttempts;
+          return { success: false, error: `Invalid verification code. ${remaining} attempt(s) remaining.` };
+        }
 
-    user.isEmailVerified = true;
-    user.verificationCodeHash = undefined;
-    user.verificationCodeExpiresAt = undefined;
-    user.verificationAttempts = 0;
-    user.lastActiveAt = new Date().toISOString();
-    this.save();
-    return { success: true, user };
+        user.isEmailVerified = true;
+        user.verificationCodeHash = undefined;
+        user.verificationCodeExpiresAt = undefined;
+        user.verificationAttempts = 0;
+        user.lastActiveAt = new Date().toISOString();
+        this.save();
+        return { success: true, user };
+      }
+    );
   }
 
   async setPasswordResetCode(userId: string, code: string): Promise<void> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.setPasswordResetCode(d1, userId, code);
-    }
-    const user = this.localData.users.find((u) => u.id === userId);
-    if (!user) return;
-    const now = Date.now();
-    user.resetPasswordCodeHash = this.hashVerificationCode(code, userId);
-    user.resetPasswordExpiresAt = now + 15 * 60 * 1000;
-    user.lastResetRequestSentAt = now;
-    user.resetPasswordAttempts = 0;
-    this.save();
+    return this.executeWithD1(
+      (d1) => d1Db.setPasswordResetCode(d1, userId, code),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const user = this.localData.users.find((u) => u.id === userId);
+        if (!user) return;
+        const now = Date.now();
+        user.resetPasswordCodeHash = this.hashVerificationCode(code, userId);
+        user.resetPasswordExpiresAt = now + 15 * 60 * 1000;
+        user.lastResetRequestSentAt = now;
+        user.resetPasswordAttempts = 0;
+        this.save();
+      }
+    );
   }
 
   async canRequestPasswordReset(
     userId: string,
     cooldownMs = 60000
   ): Promise<{ allowed: boolean; waitSeconds?: number }> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.canRequestPasswordReset(d1, userId, cooldownMs);
-    }
-    const user = this.localData.users.find((u) => u.id === userId);
-    if (!user || !user.lastResetRequestSentAt) return { allowed: true };
-    const elapsed = Date.now() - user.lastResetRequestSentAt;
-    if (elapsed < cooldownMs) {
-      return { allowed: false, waitSeconds: Math.ceil((cooldownMs - elapsed) / 1000) };
-    }
-    return { allowed: true };
+    return this.executeWithD1(
+      (d1) => d1Db.canRequestPasswordReset(d1, userId, cooldownMs),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const user = this.localData.users.find((u) => u.id === userId);
+        if (!user || !user.lastResetRequestSentAt) return { allowed: true };
+        const elapsed = Date.now() - user.lastResetRequestSentAt;
+        if (elapsed < cooldownMs) {
+          return { allowed: false, waitSeconds: Math.ceil((cooldownMs - elapsed) / 1000) };
+        }
+        return { allowed: true };
+      }
+    );
   }
 
   async verifyAndResetPassword(
@@ -646,94 +670,106 @@ export class Database {
     rawCode: string,
     newPasswordHash: string
   ): Promise<{ success: boolean; user?: User; error?: string }> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.verifyAndResetPassword(d1, email, rawCode, newPasswordHash);
-    }
-    const user = await this.findUserByEmail(email);
-    if (!user) return { success: false, error: 'Account not found' };
+    return this.executeWithD1(
+      (d1) => d1Db.verifyAndResetPassword(d1, email, rawCode, newPasswordHash),
+      async () => {
+        this.refreshLocalDataIfNeeded();
+        const user = await this.findUserByEmail(email);
+        if (!user) return { success: false, error: 'Account not found' };
 
-    const attempts = user.resetPasswordAttempts || 0;
-    if (attempts >= 5) {
-      return { success: false, error: 'Maximum reset attempts exceeded. Please request a new code.' };
-    }
+        const attempts = user.resetPasswordAttempts || 0;
+        if (attempts >= 5) {
+          return { success: false, error: 'Maximum reset attempts exceeded. Please request a new code.' };
+        }
 
-    if (!user.resetPasswordExpiresAt || Date.now() > user.resetPasswordExpiresAt) {
-      return { success: false, error: 'Password reset code has expired. Please request a new code.' };
-    }
+        if (!user.resetPasswordExpiresAt || Date.now() > user.resetPasswordExpiresAt) {
+          return { success: false, error: 'Password reset code has expired. Please request a new code.' };
+        }
 
-    const inputHash = this.hashVerificationCode(rawCode, user.id);
-    if (inputHash !== user.resetPasswordCodeHash) {
-      user.resetPasswordAttempts = attempts + 1;
-      this.save();
-      const remaining = 5 - user.resetPasswordAttempts;
-      return { success: false, error: `Invalid code. ${remaining} attempt(s) remaining.` };
-    }
+        const inputHash = this.hashVerificationCode(rawCode, user.id);
+        if (inputHash !== user.resetPasswordCodeHash) {
+          user.resetPasswordAttempts = attempts + 1;
+          this.save();
+          const remaining = 5 - user.resetPasswordAttempts;
+          return { success: false, error: `Invalid code. ${remaining} attempt(s) remaining.` };
+        }
 
-    user.passwordHash = newPasswordHash;
-    user.resetPasswordCodeHash = undefined;
-    user.resetPasswordExpiresAt = undefined;
-    user.resetPasswordAttempts = 0;
-    user.lastActiveAt = new Date().toISOString();
-    this.save();
-    return { success: true, user };
+        user.passwordHash = newPasswordHash;
+        user.resetPasswordCodeHash = undefined;
+        user.resetPasswordExpiresAt = undefined;
+        user.resetPasswordAttempts = 0;
+        user.lastActiveAt = new Date().toISOString();
+        this.save();
+        return { success: true, user };
+      }
+    );
   }
 
   async deleteUser(id: string): Promise<boolean> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.deleteUser(d1, id);
-    }
-    const index = this.localData.users.findIndex((u) => u.id === id);
-    if (index === -1) return false;
-    this.localData.users.splice(index, 1);
-    this.localData.conversations = this.localData.conversations.filter((c) => c.userId !== id);
-    this.localData.messages = this.localData.messages.filter((m) => m.userId !== id);
-    this.localData.memories = this.localData.memories.filter((m) => m.userId !== id);
-    this.localData.files = this.localData.files.filter((f) => f.userId !== id);
-    this.localData.usageDaily = this.localData.usageDaily.filter((u) => u.userId !== id);
-    this.localData.supportTickets = this.localData.supportTickets.filter((t) => t.userId !== id);
-    this.save();
-    return true;
+    return this.executeWithD1(
+      (d1) => d1Db.deleteUser(d1, id),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const index = this.localData.users.findIndex((u) => u.id === id);
+        if (index === -1) return false;
+        this.localData.users.splice(index, 1);
+        this.localData.conversations = this.localData.conversations.filter((c) => c.userId !== id);
+        this.localData.messages = this.localData.messages.filter((m) => m.userId !== id);
+        this.localData.memories = this.localData.memories.filter((m) => m.userId !== id);
+        this.localData.files = this.localData.files.filter((f) => f.userId !== id);
+        this.localData.usageDaily = this.localData.usageDaily.filter((u) => u.userId !== id);
+        this.localData.supportTickets = this.localData.supportTickets.filter((t) => t.userId !== id);
+        this.save();
+        return true;
+      }
+    );
   }
 
   // --- Conversation Operations ---
 
   async getConversations(userId: string): Promise<Conversation[]> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.getConversations(d1, userId);
-    }
-    return this.localData.conversations
-      .filter((c) => c.userId === userId && !c.isArchived)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return this.executeWithD1(
+      (d1) => d1Db.getConversations(d1, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        return this.localData.conversations
+          .filter((c) => c.userId === userId && !c.isArchived)
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      }
+    );
   }
 
   async getArchivedConversations(userId: string): Promise<Conversation[]> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.getArchivedConversations(d1, userId);
-    }
-    return this.localData.conversations
-      .filter((c) => c.userId === userId && c.isArchived)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return this.executeWithD1(
+      (d1) => d1Db.getArchivedConversations(d1, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        return this.localData.conversations
+          .filter((c) => c.userId === userId && c.isArchived)
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      }
+    );
   }
 
   async getConversationById(id: string, userId: string): Promise<Conversation | null> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.getConversationById(d1, id, userId);
-    }
-    return this.localData.conversations.find((c) => c.id === id && c.userId === userId) || null;
+    return this.executeWithD1(
+      (d1) => d1Db.getConversationById(d1, id, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        return this.localData.conversations.find((c) => c.id === id && c.userId === userId) || null;
+      }
+    );
   }
 
   async getConversationOwnerId(id: string): Promise<string | null> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.getConversationOwnerId(d1, id);
-    }
-    const conv = this.localData.conversations.find((c) => c.id === id);
-    return conv ? conv.userId : null;
+    return this.executeWithD1(
+      (d1) => d1Db.getConversationOwnerId(d1, id),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const conv = this.localData.conversations.find((c) => c.id === id);
+        return conv ? conv.userId : null;
+      }
+    );
   }
 
   async createConversation(
@@ -742,24 +778,26 @@ export class Database {
     model: string = DEFAULT_MODEL_ID,
     customId?: string
   ): Promise<Conversation> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.createConversation(d1, userId, title, model, customId);
-    }
-    const id = customId || crypto.randomUUID();
-    const now = new Date().toISOString();
-    const newConv: Conversation = {
-      id,
-      userId,
-      title,
-      model,
-      createdAt: now,
-      updatedAt: now,
-      isArchived: false,
-    };
-    this.localData.conversations.unshift(newConv);
-    this.save();
-    return newConv;
+    return this.executeWithD1(
+      (d1) => d1Db.createConversation(d1, userId, title, model, customId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const id = customId || crypto.randomUUID();
+        const now = new Date().toISOString();
+        const newConv: Conversation = {
+          id,
+          userId,
+          title,
+          model,
+          createdAt: now,
+          updatedAt: now,
+          isArchived: false,
+        };
+        this.localData.conversations.unshift(newConv);
+        this.save();
+        return newConv;
+      }
+    );
   }
 
   async updateConversation(
@@ -767,68 +805,78 @@ export class Database {
     userId: string,
     updates: Partial<Conversation>
   ): Promise<Conversation | null> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.updateConversation(d1, id, userId, updates);
-    }
-    const conv = this.localData.conversations.find((c) => c.id === id && c.userId === userId);
-    if (!conv) return null;
-    Object.assign(conv, updates, { updatedAt: new Date().toISOString() });
-    this.save();
-    return conv;
+    return this.executeWithD1(
+      (d1) => d1Db.updateConversation(d1, id, userId, updates),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const conv = this.localData.conversations.find((c) => c.id === id && c.userId === userId);
+        if (!conv) return null;
+        Object.assign(conv, updates, { updatedAt: new Date().toISOString() });
+        this.save();
+        return conv;
+      }
+    );
   }
 
   async deleteConversation(id: string, userId: string): Promise<boolean> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.deleteConversation(d1, id, userId);
-    }
-    const index = this.localData.conversations.findIndex((c) => c.id === id && c.userId === userId);
-    if (index === -1) return false;
-    this.localData.conversations.splice(index, 1);
-    this.localData.messages = this.localData.messages.filter((m) => m.conversationId !== id);
-    this.localData.files = this.localData.files.filter((f) => f.conversationId !== id);
-    this.save();
-    return true;
+    return this.executeWithD1(
+      (d1) => d1Db.deleteConversation(d1, id, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const index = this.localData.conversations.findIndex((c) => c.id === id && c.userId === userId);
+        if (index === -1) return false;
+        this.localData.conversations.splice(index, 1);
+        this.localData.messages = this.localData.messages.filter((m) => m.conversationId !== id);
+        this.localData.files = this.localData.files.filter((f) => f.conversationId !== id);
+        this.save();
+        return true;
+      }
+    );
   }
 
   async clearUserConversations(userId: string): Promise<void> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.clearUserConversations(d1, userId);
-    }
-    this.localData.conversations = this.localData.conversations.filter((c) => c.userId !== userId);
-    this.localData.messages = this.localData.messages.filter((m) => m.userId !== userId);
-    this.localData.files = this.localData.files.filter((f) => f.userId !== userId);
-    this.save();
+    return this.executeWithD1(
+      (d1) => d1Db.clearUserConversations(d1, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        this.localData.conversations = this.localData.conversations.filter((c) => c.userId !== userId);
+        this.localData.messages = this.localData.messages.filter((m) => m.userId !== userId);
+        this.localData.files = this.localData.files.filter((f) => f.userId !== userId);
+        this.save();
+      }
+    );
   }
 
   // --- Message Operations ---
 
   async getMessages(conversationId: string, userId?: string): Promise<Message[]> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.getMessages(d1, conversationId, userId);
-    }
-    return this.localData.messages
-      .filter((m) => m.conversationId === conversationId && (!userId || m.userId === userId))
-      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+    return this.executeWithD1(
+      (d1) => d1Db.getMessages(d1, conversationId, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        return this.localData.messages
+          .filter((m) => m.conversationId === conversationId && (!userId || m.userId === userId))
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      }
+    );
   }
 
   async createMessage(msg: Omit<Message, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Promise<Message> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.createMessage(d1, msg);
-    }
-    const id = (msg as any).id || crypto.randomUUID();
-    const now = msg.createdAt || new Date().toISOString();
-    const newMsg: Message = { ...msg, id, createdAt: now };
-    this.localData.messages.push(newMsg);
+    return this.executeWithD1(
+      (d1) => d1Db.createMessage(d1, msg),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const id = (msg as any).id || crypto.randomUUID();
+        const now = msg.createdAt || new Date().toISOString();
+        const newMsg: Message = { ...msg, id, createdAt: now };
+        this.localData.messages.push(newMsg);
 
-    const conv = this.localData.conversations.find((c) => c.id === msg.conversationId);
-    if (conv) conv.updatedAt = now;
-    this.save();
-    return newMsg;
+        const conv = this.localData.conversations.find((c) => c.id === msg.conversationId);
+        if (conv) conv.updatedAt = now;
+        this.save();
+        return newMsg;
+      }
+    );
   }
 
   async updateMessageReaction(
@@ -837,28 +885,32 @@ export class Database {
     liked?: boolean,
     disliked?: boolean
   ): Promise<Message | null> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.updateMessageReaction(d1, messageId, userId, liked, disliked);
-    }
-    const msg = this.localData.messages.find((m) => m.id === messageId && m.userId === userId);
-    if (!msg) return null;
-    if (liked !== undefined) msg.liked = liked;
-    if (disliked !== undefined) msg.disliked = disliked;
-    this.save();
-    return msg;
+    return this.executeWithD1(
+      (d1) => d1Db.updateMessageReaction(d1, messageId, userId, liked, disliked),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const msg = this.localData.messages.find((m) => m.id === messageId && m.userId === userId);
+        if (!msg) return null;
+        if (liked !== undefined) msg.liked = liked;
+        if (disliked !== undefined) msg.disliked = disliked;
+        this.save();
+        return msg;
+      }
+    );
   }
 
   // --- Memory Operations ---
 
   async getMemories(userId: string): Promise<Memory[]> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.getMemories(d1, userId);
-    }
-    return this.localData.memories
-      .filter((m) => m.userId === userId)
-      .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+    return this.executeWithD1(
+      (d1) => d1Db.getMemories(d1, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        return this.localData.memories
+          .filter((m) => m.userId === userId)
+          .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
+      }
+    );
   }
 
   async retrieveRelevantMemories(
@@ -866,59 +918,66 @@ export class Database {
     contextText: string,
     maxMemories = 6
   ): Promise<Memory[]> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.retrieveRelevantMemories(d1, userId, contextText, maxMemories);
-    }
-    const all = await this.getMemories(userId);
-    if (all.length === 0) return [];
-    if (!contextText || contextText.trim().length === 0) return all.slice(0, maxMemories);
+    return this.executeWithD1(
+      (d1) => d1Db.retrieveRelevantMemories(d1, userId, contextText, maxMemories),
+      async () => {
+        const all = await this.getMemories(userId);
+        if (all.length === 0) return [];
+        if (!contextText || contextText.trim().length === 0) return all.slice(0, maxMemories);
 
-    const tokens = contextText.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
-    const scored = all.map((mem) => {
-      let score = 0;
-      const memText = mem.content.toLowerCase();
-      tokens.forEach((token) => {
-        if (memText.includes(token)) score += 1;
-      });
-      return { mem, score };
-    });
-    scored.sort((a, b) => b.score - a.score);
-    return scored.map((s) => s.mem).slice(0, maxMemories);
+        const tokens = contextText.toLowerCase().split(/\s+/).filter((t) => t.length > 2);
+        const scored = all.map((mem) => {
+          let score = 0;
+          const memText = mem.content.toLowerCase();
+          tokens.forEach((token) => {
+            if (memText.includes(token)) score += 1;
+          });
+          return { mem, score };
+        });
+        scored.sort((a, b) => b.score - a.score);
+        return scored.map((s) => s.mem).slice(0, maxMemories);
+      }
+    );
   }
 
   async createMemory(memory: Omit<Memory, 'id' | 'createdAt' | 'updatedAt'>): Promise<Memory> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.createMemory(d1, memory);
-    }
-    const id = crypto.randomUUID();
-    const now = new Date().toISOString();
-    const newMemory: Memory = { ...memory, id, createdAt: now, updatedAt: now };
-    this.localData.memories.unshift(newMemory);
-    this.save();
-    return newMemory;
+    return this.executeWithD1(
+      (d1) => d1Db.createMemory(d1, memory),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const id = crypto.randomUUID();
+        const now = new Date().toISOString();
+        const newMemory: Memory = { ...memory, id, createdAt: now, updatedAt: now };
+        this.localData.memories.unshift(newMemory);
+        this.save();
+        return newMemory;
+      }
+    );
   }
 
   async deleteMemory(id: string, userId: string): Promise<boolean> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.deleteMemory(d1, id, userId);
-    }
-    const index = this.localData.memories.findIndex((m) => m.id === id && m.userId === userId);
-    if (index === -1) return false;
-    this.localData.memories.splice(index, 1);
-    this.save();
-    return true;
+    return this.executeWithD1(
+      (d1) => d1Db.deleteMemory(d1, id, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        const index = this.localData.memories.findIndex((m) => m.id === id && m.userId === userId);
+        if (index === -1) return false;
+        this.localData.memories.splice(index, 1);
+        this.save();
+        return true;
+      }
+    );
   }
 
   async clearMemories(userId: string): Promise<void> {
-    if (this.mode === 'production-d1') {
-      const d1 = this.ensureAvailable();
-      return d1Db.clearMemories(d1, userId);
-    }
-    this.localData.memories = this.localData.memories.filter((m) => m.userId !== userId);
-    this.save();
+    return this.executeWithD1(
+      (d1) => d1Db.clearMemories(d1, userId),
+      () => {
+        this.refreshLocalDataIfNeeded();
+        this.localData.memories = this.localData.memories.filter((m) => m.userId !== userId);
+        this.save();
+      }
+    );
   }
 
   // --- File Operations ---

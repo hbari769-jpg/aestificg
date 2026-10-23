@@ -698,6 +698,8 @@ function MainApp() {
       const err: any = new Error(data.error || 'Registration failed');
       err.code = data.code;
       err.status = res.status;
+      err.requiresVerification = data.requiresVerification;
+      err.email = data.email || email;
       throw err;
     }
     if (data.user && data.requiresVerification === false) {
@@ -743,7 +745,7 @@ function MainApp() {
       }
       return { requiresVerification: false, email: data.email || email };
     }
-    return { requiresVerification: true, email: data.email || email };
+    return { requiresVerification: true, email: data.email || email, message: data.message };
   };
 
   const handleDemoLogin = async () => {

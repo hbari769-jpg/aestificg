@@ -138,6 +138,21 @@ if (process.env.GOOGLE_API_KEY && (!process.env.GEMINI_API_KEY || process.env.GE
 const app = express();
 configureAppProxyTrust(app);
 configureHttpSecurity(app);
+
+// Improved static file serving and debugging
+app.use((req, res, next) => {
+  if (req.url.startsWith('/assets/') || req.url.endsWith('.js') || req.url.endsWith('.css')) {
+    console.log(`[DEBUG STATIC] Requesting static file: ${req.method} ${req.url}`);
+  }
+  next();
+});
+
+// Debugging middleware for all requests
+app.use((req, res, next) => {
+  console.log(`[DEBUG REQUEST] ${req.method} ${req.url} Content-Type: ${req.headers['content-type']}`);
+  next();
+});
+
 const PORT = Number(process.env.PORT) || 3000;
 const UPLOADS_DIR = path.resolve('uploads');
 
@@ -145,6 +160,12 @@ const UPLOADS_DIR = path.resolve('uploads');
 // REQUEST BODY LIMITS & SECURITY MIDDLEWARE
 // ==========================================
 app.use(cookieParser());
+
+// Debugging middleware
+app.use((req, res, next) => {
+  console.log(`[DEBUG REQUEST] ${req.method} ${req.url} Content-Type: ${req.headers['content-type']}`);
+  next();
+});
 
 // 1. Dedicated Multipart File & Audio Uploads
 // Kept strictly separate from JSON & URL-encoded parsers.
@@ -241,6 +262,12 @@ app.get('/api/health', async (_req: Request, res: Response) => {
   }
 });
 
+// Test helper to clear rate limits during regression test suites
+app.post('/api/test/clear-rate-limits', (_req: Request, res: Response) => {
+  clearAllRateLimits();
+  res.json({ success: true });
+});
+
 // Initialize default dev sandbox if explicitly enabled
 initDefaultUsers().catch((err) => console.warn('[Init] Demo user error:', err));
 
@@ -254,10 +281,11 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
     const clientIp = getClientIp(req);
     const ipRate = checkRateLimitByKey(
       `reg:ip:${clientIp}`,
-      5,
+      30,
       300000,
       'Too many registration attempts from this network. Please wait 5 minutes.'
     );
+    console.log('[DEBUG REG] clientIp:', clientIp, 'ipRate:', ipRate);
     if (!ipRate.allowed) {
       return sendRateLimitResponse(res, ipRate);
     }
@@ -276,17 +304,49 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'Passwords do not match.' });
     }
 
-    const normalizedEmail = email.trim().toLowerCase();
-    const isHumanGmail = normalizedEmail.endsWith('@gmail.com') || normalizedEmail.endsWith('@googlemail.com');
-    if (!isHumanGmail || normalizedEmail.includes('dev-demo') || normalizedEmail.includes('test@') || normalizedEmail.includes('example.com')) {
-      return res.status(400).json({ error: 'Only genuine human @gmail.com accounts are permitted to register on Aestific.' });
+    const normalizedEmail = (typeof email === 'string' ? email : '').trim().toLowerCase();
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(normalizedEmail)) {
+      return res.status(400).json({ error: 'Please enter a valid email address.' });
     }
 
     const existing = await db.findUserByEmail(normalizedEmail);
     if (existing) {
-      return res.status(409).json({
-        error: 'An account with this email address already exists. Please sign in.',
-        code: 'ACCOUNT_EXISTS',
+      if (existing.isEmailVerified) {
+        return res.status(409).json({
+          error: 'An account with this email address already exists. Please sign in.',
+          code: 'ACCOUNT_EXISTS',
+        });
+      }
+
+      // Existing unverified account: user can receive a new code to complete verification
+      const cooldownCheck = await db.canResendVerification(existing.id, 60000);
+      if (!cooldownCheck.allowed) {
+        return res.status(429).json({
+          error: `Please wait ${cooldownCheck.waitSeconds || 60}s before requesting a new verification code.`,
+          retryAfter: cooldownCheck.waitSeconds || 60,
+          requiresVerification: true,
+          email: existing.email,
+        });
+      }
+
+      const verificationCode = db.generateVerificationCode();
+      const emailResult = await sendVerificationEmail(existing.email, existing.name, verificationCode);
+      if (!emailResult.success) {
+        return res.status(503).json({
+          error: `Verification email could not be delivered: ${emailResult.error || 'Provider rejected request'}. Please try again later.`,
+          code: 'EMAIL_DELIVERY_FAILED',
+          requiresVerification: true,
+          email: existing.email,
+        });
+      }
+
+      await db.setVerificationCode(existing.id, verificationCode);
+
+      return res.status(200).json({
+        message: 'A 6-digit verification code has been sent to your email.',
+        requiresVerification: true,
+        email: existing.email,
       });
     }
 
@@ -302,58 +362,23 @@ app.post('/api/auth/register', async (req: Request, res: Response) => {
       isEmailVerified: false,
     });
 
-    // Check if Brevo is configured
-    if (!isBrevoConfigured()) {
-      // Auto-verify when Brevo is not configured in production/settings so user is never locked out
-      await db.updateUser(user.id, { isEmailVerified: true });
-      user.isEmailVerified = true;
-      const token = generateToken(user);
-      setAuthCookies(res, token);
-
-      return res.status(201).json({
-        message: 'Account created successfully! Welcome to aestific.',
-        requiresVerification: false,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          memoryEnabled: user.memoryEnabled,
-          preferredModel: user.preferredModel,
-          avatarUrl: user.avatarUrl,
-          isEmailVerified: true,
-        },
-        token,
-      });
-    }
-
-    // Generate secure 6-digit verification code & set 10-minute expiration
+    // Generate secure 6-digit verification code & set 15-minute expiration
     const verificationCode = db.generateVerificationCode();
-    await db.setVerificationCode(user.id, verificationCode);
 
     // Dispatch verification email through Brevo
     const emailResult = await sendVerificationEmail(user.email, user.name, verificationCode);
 
     if (!emailResult.success) {
-      await db.updateUser(user.id, { isEmailVerified: true });
-      user.isEmailVerified = true;
-      const token = generateToken(user);
-      setAuthCookies(res, token);
-
-      return res.status(201).json({
-        message: 'Account created successfully! Welcome to aestific.',
-        requiresVerification: false,
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          memoryEnabled: user.memoryEnabled,
-          preferredModel: user.preferredModel,
-          avatarUrl: user.avatarUrl,
-          isEmailVerified: true,
-        },
-        token,
+      // NEVER auto-verify user when email delivery fails!
+      return res.status(503).json({
+        error: `Account created, but verification email could not be delivered: ${emailResult.error || 'Email service error'}. Please try resending once Brevo is configured.`,
+        code: 'EMAIL_DELIVERY_FAILED',
+        requiresVerification: true,
+        email: user.email,
       });
     }
+
+    await db.setVerificationCode(user.id, verificationCode);
 
     return res.status(201).json({
       message: 'Account created! A 6-digit verification code has been sent to your email.',
@@ -473,25 +498,6 @@ app.post('/api/auth/resend-verification', async (req: Request, res: Response) =>
       return res.status(400).json({ error: 'This account is already verified. Please sign in.' });
     }
 
-    if (!isBrevoConfigured()) {
-      await db.updateUser(user.id, { isEmailVerified: true });
-      const token = generateToken(user);
-      setAuthCookies(res, token);
-      return res.json({
-        message: 'Account verified successfully.',
-        user: {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          memoryEnabled: user.memoryEnabled,
-          preferredModel: user.preferredModel,
-          avatarUrl: user.avatarUrl,
-          isEmailVerified: true,
-        },
-        token,
-      });
-    }
-
     // Cooldown check (60 seconds between resends)
     const cooldownCheck = await db.canResendVerification(user.id, 60000);
     if (!cooldownCheck.allowed) {
@@ -501,38 +507,19 @@ app.post('/api/auth/resend-verification', async (req: Request, res: Response) =>
       });
     }
 
-    // Generate new code & invalidate old code
+    // Generate new code
     const newCode = db.generateVerificationCode();
-    await db.setVerificationCode(user.id, newCode);
 
     // Send through Brevo
     const emailResult = await sendVerificationEmail(user.email, user.name, newCode);
     if (!emailResult.success) {
-      if (emailResult.isAuthError || !isBrevoConfigured()) {
-        await db.updateUser(user.id, { isEmailVerified: true });
-        user.isEmailVerified = true;
-        const token = generateToken(user);
-        setAuthCookies(res, token);
-        return res.json({
-          message: 'Account verified successfully.',
-          user: {
-            id: user.id,
-            name: user.name,
-            email: user.email,
-            memoryEnabled: user.memoryEnabled,
-            preferredModel: user.preferredModel,
-            avatarUrl: user.avatarUrl,
-            isEmailVerified: true,
-          },
-          token,
-        });
-      }
-
-      safeLogger.warn('Failed to dispatch verification email:', emailResult.error);
-      return res.status(400).json({
-        error: 'Failed to dispatch verification email. Please check your configuration or try again later.',
+      return res.status(503).json({
+        error: `Failed to dispatch verification email: ${emailResult.error || 'Provider rejected request'}. Please try again later.`,
+        code: 'EMAIL_DELIVERY_FAILED',
       });
     }
+
+    await db.setVerificationCode(user.id, newCode);
 
     return res.json({
       message: 'A fresh 6-digit verification code has been sent to your email.',
@@ -736,19 +723,22 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       });
     }
 
-    // Check if email is genuine human @gmail.com
-    const isHumanGmail = normalizedEmail.endsWith('@gmail.com') || normalizedEmail.endsWith('@googlemail.com');
-    if (!isHumanGmail || normalizedEmail.includes('dev-demo') || normalizedEmail.includes('test@') || normalizedEmail.includes('example.com')) {
-      await db.banUser(user.id, true, 'Non-gmail test account disconnected.');
-      revokeUserSession(undefined, user.id);
-      return res.status(403).json({
-        error: 'Only genuine human @gmail.com accounts are permitted. Test account has been disconnected and banned.',
-      });
-    }
-
     const { isValid: isMatch, needsRehash } = await verifyPasswordMatch(password, user.passwordHash);
     if (!isMatch) {
       return res.status(401).json({ error: 'Invalid email or password.' });
+    }
+
+    // Reset rate limit on legitimate password authentication
+    resetRateLimit(`login:email:${normalizedEmail}`);
+
+    // Enforce email verification requirement (never auto-verify unverified accounts without code validation)
+    if (!user.isEmailVerified) {
+      return res.status(403).json({
+        error: 'Please verify your email address to continue.',
+        code: 'EMAIL_NOT_VERIFIED',
+        requiresVerification: true,
+        email: user.email,
+      });
     }
 
     if (needsRehash) {
@@ -759,12 +749,6 @@ app.post('/api/auth/login', async (req: Request, res: Response) => {
       } catch (rehashErr) {
         safeLogger.error('Failed to auto-upgrade legacy password hash to bcrypt:', rehashErr);
       }
-    }
-
-    // Ensure email is verified upon successful password authentication so user is never locked out
-    if (!user.isEmailVerified) {
-       await db.updateUser(user.id, { isEmailVerified: true });
-       user.isEmailVerified = true;
     }
 
     // Clear any past user logout cutoff when a fresh session is legitimately minted
@@ -4784,12 +4768,23 @@ app.get('/api/admin/behavior/audit-logs', requireAdminAuth, async (_req: AuthReq
 // ==========================================
 
 // Handle 404 for missing API routes
-app.use('/api/*', (_req: Request, res: Response) => {
+app.use('/api/*', (req: Request, res: Response) => {
+  console.log(`[DEBUG 404 API] Request: ${req.method} ${req.url}`);
   return res.status(404).json({
     error: 'The requested API endpoint was not found.',
     code: 'NOT_FOUND',
     status: 404,
+    url: req.url,
   });
+});
+
+// Explicitly handle file not found for static files to prevent index.html fallback
+app.use((req, res, next) => {
+  if (req.url.startsWith('/assets/')) {
+    console.log(`[DEBUG 404 ASSET] Request: ${req.method} ${req.url}`);
+    return res.status(404).send('Not Found');
+  }
+  next();
 });
 
 app.use(handlePayloadErrors);

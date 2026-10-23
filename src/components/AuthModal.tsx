@@ -21,7 +21,7 @@ import { setAuthToken } from '../lib/api';
 interface AuthModalProps {
   initialMode?: 'login' | 'register';
   onLogin: (email: string, pass: string, remember: boolean) => Promise<{ requiresVerification?: boolean; email?: string } | void>;
-  onRegister: (name: string, email: string, pass: string, confirm: string) => Promise<{ requiresVerification?: boolean; email?: string } | void>;
+  onRegister: (name: string, email: string, pass: string, confirm: string) => Promise<{ requiresVerification?: boolean; email?: string; message?: string } | void>;
   onDemoLogin?: () => Promise<void>;
   onVerifyEmail?: (email: string, code: string) => Promise<void>;
   onResendVerification?: (email: string) => Promise<string>;
@@ -124,7 +124,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
           setMode('verify');
           setExpireSecondsRemaining(600);
           setResendCooldown(60);
-          setSuccessInfo(`Verification code sent via Brevo to ${res.email || email.trim()}`);
+          setSuccessInfo(res.message || `A 6-digit verification code has been sent to ${res.email || email.trim()}`);
         }
       } else if (mode === 'verify') {
         const cleanCode = verificationCode.trim();

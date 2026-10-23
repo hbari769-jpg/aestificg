@@ -11,18 +11,12 @@ interface BrevoSendResult {
   isAuthError?: boolean;
 }
 
-// Track if current Brevo API Key failed authentication (e.g. HTTP 401 Key not found)
-let lastFailedApiKey: string | null = null;
-
 export function isBrevoConfigured(): boolean {
   const apiKey = (process.env.BREVO_API_KEY || '').trim().replace(/^['"]|['"]$/g, '');
   const senderEmail = (process.env.BREVO_SENDER_EMAIL || '').trim().replace(/^['"]|['"]$/g, '');
-  
-  if (!apiKey || (lastFailedApiKey && lastFailedApiKey === apiKey)) {
-    return false;
-  }
 
   return Boolean(
+    apiKey &&
     apiKey.startsWith('xkeysib-') &&
     apiKey.length > 25 &&
     senderEmail &&
@@ -288,11 +282,10 @@ Security Notice: If you did not create an Aestific account, please ignore this e
       const statusCode = response.status;
       const rawMsg = redactSensitiveData(String(errorData?.message || errorData?.code || 'Brevo API rejected request'));
 
-      if (statusCode === 401 || statusCode === 403 || String(rawMsg).toLowerCase().includes('key not found')) {
-        lastFailedApiKey = apiKey;
+      if (statusCode === 401 || statusCode === 403 || String(rawMsg).toLowerCase().includes('key not found') || String(rawMsg).toLowerCase().includes('unauthorized')) {
         return {
           success: false,
-          error: 'Brevo authentication failed (HTTP 401: Key not found). Please verify your BREVO_API_KEY in Settings.',
+          error: 'Brevo authentication failed (HTTP 401: Key not found). Please verify your BREVO_API_KEY in environment variables.',
           isAuthError: true,
         };
       }
@@ -576,11 +569,10 @@ Security Notice: If you did not request this reset, please disregard this messag
       const statusCode = response.status;
       const rawMsg = redactSensitiveData(String(errorData?.message || errorData?.code || 'Brevo API rejected request'));
 
-      if (statusCode === 401 || statusCode === 403 || String(rawMsg).toLowerCase().includes('key not found')) {
-        lastFailedApiKey = apiKey;
+      if (statusCode === 401 || statusCode === 403 || String(rawMsg).toLowerCase().includes('key not found') || String(rawMsg).toLowerCase().includes('unauthorized')) {
         return {
           success: false,
-          error: 'Brevo authentication failed (HTTP 401: Key not found). Please ensure BREVO_API_KEY is valid.',
+          error: 'Brevo authentication failed (HTTP 401: Key not found). Please ensure BREVO_API_KEY is valid in environment variables.',
           isAuthError: true,
         };
       }
@@ -732,11 +724,10 @@ export async function sendAdminDirectEmail(options: {
       const statusCode = response.status;
       const rawMsg = redactSensitiveData(String(errorData?.message || errorData?.code || 'Brevo API rejected email dispatch'));
 
-      if (statusCode === 401 || statusCode === 403 || String(rawMsg).toLowerCase().includes('key not found')) {
-        lastFailedApiKey = apiKeyPort;
+      if (statusCode === 401 || statusCode === 403 || String(rawMsg).toLowerCase().includes('key not found') || String(rawMsg).toLowerCase().includes('unauthorized')) {
         return {
           success: false,
-          error: 'Brevo authentication failed (HTTP 401: Key not found). Please check your BREVO_API_KEY in settings.',
+          error: 'Brevo authentication failed (HTTP 401: Key not found). Please check your BREVO_API_KEY in environment variables.',
           isAuthError: true,
         };
       }

@@ -418,9 +418,7 @@ class ProductionRateLimiter {
    * Clear all rate limits (for testing, maintenance, or admin reset).
    */
   public clearAll(): void {
-    if (RATE_LIMITING_ENABLED) {
-      this.ensureDatabaseInitialized();
-    }
+    this.ensureDatabaseInitialized();
 
     if (this.isFallbackMode || !this.db) {
       this.fallbackRateLimitBuckets.clear();

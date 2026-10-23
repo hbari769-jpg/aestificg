@@ -1128,41 +1128,21 @@ export default {
             email: normalizedEmail,
             passwordHash,
             memoryEnabled: true,
-            isEmailVerified: !brevoActive,
+            isEmailVerified: false,
             preferredModel: 'qwen/qwen3.8-27b',
             systemPrompt: 'You are Aestific, an AI platform that brings together different AI models and intelligently uses the one best suited for each task—all through one simple interface. Aestific was founded and built by Atif Al Wasi.',
           });
         }
 
         if (!brevoActive) {
-          const secret = getWorkerJwtSecret(env);
-          if (!secret) {
-            return jsonResponse(
-              { error: 'Server authentication configuration error: JWT_SECRET secret binding is required.' },
-              500
-            );
-          }
-          const token = await signJwt({ id: user.id, email: user.email }, secret);
-
           return jsonResponse(
             {
-              message: 'Account created successfully!',
-              requiresVerification: false,
-              user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                memoryEnabled: user.memoryEnabled,
-                preferredModel: user.preferredModel,
-                avatarUrl: user.avatarUrl,
-                isEmailVerified: true,
-              },
-              token,
+              error: 'Brevo email service is not configured (missing or invalid BREVO_API_KEY). Email verification is required to activate accounts.',
+              code: 'EMAIL_DELIVERY_FAILED',
+              requiresVerification: true,
+              email: user.email,
             },
-            201,
-            {
-              'Set-Cookie': `aestific_token=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`,
-            }
+            503
           );
         }
 
@@ -1172,30 +1152,14 @@ export default {
         const emailResult = await sendWorkerVerificationEmail(env, user.email, user.name, verificationCode);
 
         if (!emailResult.success) {
-          await d1Db.updateUser(env.DB, user.id, { isEmailVerified: true });
-          const secret = getWorkerJwtSecret(env);
-          const token = secret ? await signJwt({ id: user.id, email: user.email }, secret) : '';
           return jsonResponse(
             {
-              message: 'Account created successfully! Welcome to Aestific.',
-              requiresVerification: false,
-              user: {
-                id: user.id,
-                name: user.name,
-                email: user.email,
-                memoryEnabled: user.memoryEnabled,
-                preferredModel: user.preferredModel,
-                avatarUrl: user.avatarUrl,
-                isEmailVerified: true,
-              },
-              token,
+              error: `Verification email could not be delivered: ${emailResult.error || 'Provider rejected request'}. Please try again later.`,
+              code: 'EMAIL_DELIVERY_FAILED',
+              requiresVerification: true,
+              email: user.email,
             },
-            201,
-            token
-              ? {
-                  'Set-Cookie': `aestific_token=${token}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=604800`,
-                }
-              : undefined
+            503
           );
         }
 
@@ -1325,8 +1289,7 @@ export default {
         }
 
         if (!isWorkerBrevoConfigured(env)) {
-          await d1Db.updateUser(env.DB, user.id, { isEmailVerified: true });
-          return jsonResponse({ message: 'Email verified automatically (Brevo service not active).' });
+          return jsonResponse({ error: 'Brevo email service is not configured (missing or invalid BREVO_API_KEY).', code: 'EMAIL_DELIVERY_FAILED' }, 503);
         }
 
         const code = generateWorkerVerificationCode();

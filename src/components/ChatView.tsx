@@ -49,6 +49,7 @@ import { useExperienceSettings } from '../lib/ExperienceSettingsContext';
 import { useTheme } from '../lib/ThemeContext';
 import { useToast } from './Toast';
 import { WaterTransition } from './WaterTransition';
+import { WelcomeAnnouncement } from './WelcomeAnnouncement';
 
 export function AestificEnhanceOrb({ className = "w-5 h-5", isEnhancing = false }: { className?: string; isEnhancing?: boolean }) {
   return (
